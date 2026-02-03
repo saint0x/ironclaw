@@ -96,14 +96,19 @@ impl NearAiProvider {
             });
         }
 
-        serde_json::from_str(&response_text).map_err(|e| {
-            tracing::error!("Failed to parse NEAR AI response: {}", e);
-            tracing::error!("Response was: {}", response_text);
-            LlmError::InvalidResponse {
-                provider: "nearai".to_string(),
-                reason: format!("JSON parse error: {}", e),
+        // Try to parse as JSON, but the API might return plain text
+        match serde_json::from_str::<R>(&response_text) {
+            Ok(parsed) => Ok(parsed),
+            Err(e) => {
+                tracing::debug!("Response is not expected JSON format: {}", e);
+                // If it's not valid JSON for our expected type, it might be a raw string response
+                // We'll handle this in the caller
+                Err(LlmError::InvalidResponse {
+                    provider: "nearai".to_string(),
+                    reason: format!("Unexpected response format. Raw: {}", response_text),
+                })
             }
-        })
+        }
     }
 }
 
@@ -121,7 +126,35 @@ impl LlmProvider for NearAiProvider {
             tools: None,
         };
 
-        let response: NearAiResponse = self.send_request("responses", &request).await?;
+        // Try to get structured response, fall back to raw text
+        let response: NearAiResponse = match self.send_request("responses", &request).await {
+            Ok(r) => r,
+            Err(LlmError::InvalidResponse { reason, .. })
+                if reason.starts_with("Unexpected response format. Raw: ") =>
+            {
+                // API returned plain text instead of JSON structure
+                let raw_text = reason
+                    .strip_prefix("Unexpected response format. Raw: ")
+                    .unwrap_or("");
+
+                // Check if it's a JSON string (quoted)
+                let text = if raw_text.starts_with('"') {
+                    serde_json::from_str::<String>(raw_text)
+                        .unwrap_or_else(|_| raw_text.to_string())
+                } else {
+                    raw_text.to_string()
+                };
+
+                tracing::info!("NEAR AI returned plain text response");
+                return Ok(CompletionResponse {
+                    content: text,
+                    finish_reason: FinishReason::Stop,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                });
+            }
+            Err(e) => return Err(e),
+        };
 
         tracing::debug!("NEAR AI response: {:?}", response);
 
@@ -208,7 +241,35 @@ impl LlmProvider for NearAiProvider {
             tools: if tools.is_empty() { None } else { Some(tools) },
         };
 
-        let response: NearAiResponse = self.send_request("responses", &request).await?;
+        // Try to get structured response, fall back to raw text
+        let response: NearAiResponse = match self.send_request("responses", &request).await {
+            Ok(r) => r,
+            Err(LlmError::InvalidResponse { reason, .. })
+                if reason.starts_with("Unexpected response format. Raw: ") =>
+            {
+                // API returned plain text instead of JSON structure
+                let raw_text = reason
+                    .strip_prefix("Unexpected response format. Raw: ")
+                    .unwrap_or("");
+
+                let text = if raw_text.starts_with('"') {
+                    serde_json::from_str::<String>(raw_text)
+                        .unwrap_or_else(|_| raw_text.to_string())
+                } else {
+                    raw_text.to_string()
+                };
+
+                tracing::info!("NEAR AI returned plain text response (tool request)");
+                return Ok(ToolCompletionResponse {
+                    content: Some(text),
+                    tool_calls: vec![],
+                    finish_reason: FinishReason::Stop,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                });
+            }
+            Err(e) => return Err(e),
+        };
 
         // Extract text and tool calls from response
         let mut text = String::new();
