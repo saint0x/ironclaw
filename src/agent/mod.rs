@@ -12,6 +12,7 @@
 mod agent_loop;
 pub mod compaction;
 pub mod context_monitor;
+pub mod events;
 mod heartbeat;
 mod router;
 mod scheduler;
@@ -26,6 +27,10 @@ pub mod worker;
 pub use agent_loop::{Agent, AgentDeps};
 pub use compaction::{CompactionResult, ContextCompactor};
 pub use context_monitor::{CompactionStrategy, ContextBreakdown, ContextMonitor};
+pub use events::{
+    AgentEvent, AgentEventBus, ContentBlock, EventData, EventStream, StopReason, ToolCallMeta,
+    ToolPhase, TurnResult, TurnUsage,
+};
 pub use heartbeat::{HeartbeatConfig, HeartbeatResult, HeartbeatRunner, spawn_heartbeat};
 pub use router::{MessageIntent, Router};
 pub use scheduler::Scheduler;

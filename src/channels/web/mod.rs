@@ -223,6 +223,51 @@ impl Channel for GatewayChannel {
                 parameters: serde_json::to_string_pretty(&parameters)
                     .unwrap_or_else(|_| parameters.to_string()),
             },
+            StatusUpdate::TextDelta { delta, text } => SseEvent::TextDelta {
+                delta,
+                text,
+                run_id: None,
+            },
+            StatusUpdate::ThinkingDelta { delta } => SseEvent::ThinkingDelta {
+                delta,
+                run_id: None,
+            },
+            StatusUpdate::ToolProgress {
+                tool_call_id,
+                name,
+                partial_result,
+            } => SseEvent::ToolProgress {
+                tool_call_id,
+                name,
+                partial_result,
+                run_id: None,
+            },
+            StatusUpdate::TurnStart {
+                run_id,
+                turn_number,
+                thread_id,
+                model,
+                provider,
+            } => SseEvent::TurnStart {
+                run_id,
+                turn_number,
+                thread_id: thread_id.to_string(),
+                model,
+                provider,
+            },
+            StatusUpdate::TurnEnd {
+                run_id,
+                turn_number,
+                thread_id,
+                stop_reason,
+                duration_ms,
+            } => SseEvent::TurnEnd {
+                run_id,
+                turn_number,
+                thread_id: thread_id.to_string(),
+                usage: serde_json::json!({ "duration_ms": duration_ms }),
+                stop_reason,
+            },
         };
 
         self.state.sse.broadcast(event);

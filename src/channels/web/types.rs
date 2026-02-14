@@ -41,6 +41,18 @@ pub struct TurnInfo {
     pub started_at: String,
     pub completed_at: Option<String>,
     pub tool_calls: Vec<ToolCallInfo>,
+    /// Rich tool call metadata (when available).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tool_call_metas: Vec<ToolCallMetaInfo>,
+    /// Token usage for this turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TurnUsageInfo>,
+    /// Why the model stopped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    /// Duration in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -48,6 +60,42 @@ pub struct ToolCallInfo {
     pub name: String,
     pub has_result: bool,
     pub has_error: bool,
+}
+
+/// Rich tool call metadata exposed via API.
+#[derive(Debug, Serialize)]
+pub struct ToolCallMetaInfo {
+    pub tool_call_id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    pub started_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+}
+
+/// Token usage info exposed via API.
+#[derive(Debug, Serialize)]
+pub struct TurnUsageInfo {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub total_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_tokens: Option<u32>,
+    pub model: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<String>,
+    pub duration_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,6 +143,66 @@ pub enum SseEvent {
     Error { message: String },
     #[serde(rename = "heartbeat")]
     Heartbeat,
+
+    // -- Rich agent events (for dashboard/UI) --
+    /// An agent event forwarded from the AgentEventBus.
+    #[serde(rename = "agent_event")]
+    AgentEvent {
+        run_id: String,
+        seq: u64,
+        stream: String,
+        data: serde_json::Value,
+    },
+
+    /// Turn started with model/thread info.
+    #[serde(rename = "turn_start")]
+    TurnStart {
+        run_id: String,
+        turn_number: usize,
+        thread_id: String,
+        model: String,
+        provider: String,
+    },
+
+    /// Turn completed with usage summary.
+    #[serde(rename = "turn_end")]
+    TurnEnd {
+        run_id: String,
+        turn_number: usize,
+        thread_id: String,
+        usage: serde_json::Value,
+        stop_reason: String,
+    },
+
+    /// Streaming text delta from the LLM.
+    #[serde(rename = "text_delta")]
+    TextDelta {
+        delta: String,
+        text: String,
+        /// Run ID for correlating deltas to a specific turn.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+    },
+
+    /// Streaming thinking delta.
+    #[serde(rename = "thinking_delta")]
+    ThinkingDelta {
+        delta: String,
+        /// Run ID for correlating deltas to a specific turn.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+    },
+
+    /// Tool execution progress (intermediate output).
+    #[serde(rename = "tool_progress")]
+    ToolProgress {
+        tool_call_id: String,
+        name: String,
+        partial_result: String,
+        /// Run ID for correlating progress to a specific turn.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+    },
 }
 
 // --- Memory ---
@@ -314,11 +422,18 @@ impl WsServerMessage {
             SseEvent::Thinking { .. } => "thinking",
             SseEvent::ToolStarted { .. } => "tool_started",
             SseEvent::ToolCompleted { .. } => "tool_completed",
+            SseEvent::ToolResult { .. } => "tool_result",
             SseEvent::StreamChunk { .. } => "stream_chunk",
             SseEvent::Status { .. } => "status",
             SseEvent::ApprovalNeeded { .. } => "approval_needed",
             SseEvent::Error { .. } => "error",
             SseEvent::Heartbeat => "heartbeat",
+            SseEvent::AgentEvent { .. } => "agent_event",
+            SseEvent::TurnStart { .. } => "turn_start",
+            SseEvent::TurnEnd { .. } => "turn_end",
+            SseEvent::TextDelta { .. } => "text_delta",
+            SseEvent::ThinkingDelta { .. } => "thinking_delta",
+            SseEvent::ToolProgress { .. } => "tool_progress",
         };
         let data = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
         WsServerMessage::Event {

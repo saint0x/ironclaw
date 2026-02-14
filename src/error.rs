@@ -39,6 +39,22 @@ pub enum Error {
 
     #[error("Workspace error: {0}")]
     Workspace(#[from] WorkspaceError),
+
+    #[error("Aria registry error: {0}")]
+    Aria(#[from] AriaError),
+}
+
+/// Aria registry system errors.
+#[derive(Debug, thiserror::Error)]
+pub enum AriaError {
+    #[error("Registry error: {0}")]
+    Registry(#[from] crate::aria::registry::RegistryError),
+
+    #[error("Execution error: {0}")]
+    Execution(String),
+
+    #[error("Schedule error: {0}")]
+    Schedule(String),
 }
 
 /// Configuration-related errors.

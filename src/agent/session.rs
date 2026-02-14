@@ -16,6 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::agent::events::{ContentBlock, StopReason, ToolCallMeta, TurnUsage};
 use crate::llm::ChatMessage;
 
 /// A session containing one or more threads.
@@ -362,8 +363,20 @@ pub struct Turn {
     pub user_input: String,
     /// Agent response (if completed).
     pub response: Option<String>,
-    /// Tool calls made during this turn.
+    /// Tool calls made during this turn (legacy, kept for compat).
     pub tool_calls: Vec<TurnToolCall>,
+    /// Rich tool call metadata with timing and IDs.
+    #[serde(default)]
+    pub tool_call_metas: Vec<ToolCallMeta>,
+    /// Content blocks produced by the LLM during this turn.
+    #[serde(default)]
+    pub content_blocks: Vec<ContentBlock>,
+    /// Aggregated token usage for this turn.
+    #[serde(default)]
+    pub usage: Option<TurnUsage>,
+    /// Why the model stopped generating.
+    #[serde(default)]
+    pub stop_reason: Option<StopReason>,
     /// Turn state.
     pub state: TurnState,
     /// When the turn started.
@@ -382,6 +395,10 @@ impl Turn {
             user_input: user_input.into(),
             response: None,
             tool_calls: Vec::new(),
+            tool_call_metas: Vec::new(),
+            content_blocks: Vec::new(),
+            usage: None,
+            stop_reason: None,
             state: TurnState::Processing,
             started_at: Utc::now(),
             completed_at: None,
@@ -431,6 +448,35 @@ impl Turn {
         if let Some(call) = self.tool_calls.last_mut() {
             call.error = Some(error.into());
         }
+    }
+
+    /// Record a rich tool call with full metadata.
+    pub fn record_tool_meta(&mut self, meta: ToolCallMeta) {
+        self.tool_call_metas.push(meta);
+    }
+
+    /// Add a content block produced by the LLM.
+    pub fn add_content_block(&mut self, block: ContentBlock) {
+        self.content_blocks.push(block);
+    }
+
+    /// Set the usage for this turn.
+    pub fn set_usage(&mut self, usage: TurnUsage) {
+        self.usage = Some(usage);
+    }
+
+    /// Set the stop reason.
+    pub fn set_stop_reason(&mut self, reason: StopReason) {
+        self.stop_reason = Some(reason);
+    }
+
+    /// Get the duration of this turn in milliseconds.
+    pub fn duration_ms(&self) -> Option<u64> {
+        self.completed_at.map(|completed| {
+            (completed - self.started_at)
+                .num_milliseconds()
+                .unsigned_abs()
+        })
     }
 }
 

@@ -121,6 +121,32 @@ pub enum StatusUpdate {
         description: String,
         parameters: serde_json::Value,
     },
+    /// Streaming text delta from LLM (accumulated + delta).
+    TextDelta { delta: String, text: String },
+    /// Streaming extended thinking delta.
+    ThinkingDelta { delta: String },
+    /// Tool execution progress (intermediate output).
+    ToolProgress {
+        tool_call_id: String,
+        name: String,
+        partial_result: String,
+    },
+    /// Turn started.
+    TurnStart {
+        run_id: String,
+        turn_number: usize,
+        thread_id: Uuid,
+        model: String,
+        provider: String,
+    },
+    /// Turn completed with usage.
+    TurnEnd {
+        run_id: String,
+        turn_number: usize,
+        thread_id: Uuid,
+        stop_reason: String,
+        duration_ms: u64,
+    },
 }
 
 /// Trait for message channels.

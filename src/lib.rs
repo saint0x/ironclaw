@@ -38,7 +38,9 @@
 //! - **Prompt injection defense** - Sanitize all external data
 //! - **Continuous learning** - Improve estimates from historical data
 
+pub mod afw;
 pub mod agent;
+pub mod aria;
 pub mod channels;
 pub mod cli;
 pub mod config;
@@ -51,6 +53,7 @@ pub mod history;
 pub mod llm;
 pub mod safety;
 pub mod sandbox;
+pub mod sdk;
 pub mod secrets;
 pub mod settings;
 pub mod setup;

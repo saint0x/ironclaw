@@ -343,6 +343,34 @@ async fn chat_history_handler(
                     has_error: tc.error.is_some(),
                 })
                 .collect(),
+            tool_call_metas: t
+                .tool_call_metas
+                .iter()
+                .map(|m| ToolCallMetaInfo {
+                    tool_call_id: m.tool_call_id.clone(),
+                    name: m.name.clone(),
+                    arguments: m.arguments.clone(),
+                    result: m.result.clone(),
+                    error: m.error.clone(),
+                    duration_ms: m.duration_ms,
+                    started_at: m.started_at.to_rfc3339(),
+                    completed_at: m.completed_at.map(|dt| dt.to_rfc3339()),
+                })
+                .collect(),
+            usage: t.usage.as_ref().map(|u| TurnUsageInfo {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+                total_tokens: u.total_tokens,
+                cache_read_tokens: u.cache_read_tokens,
+                cache_write_tokens: u.cache_write_tokens,
+                thinking_tokens: u.thinking_tokens,
+                model: u.model.clone(),
+                provider: u.provider.clone(),
+                cost_usd: u.cost_usd.map(|c| c.to_string()),
+                duration_ms: u.duration_ms,
+            }),
+            stop_reason: t.stop_reason.map(|r| r.to_string()),
+            duration_ms: t.duration_ms(),
         })
         .collect();
 
