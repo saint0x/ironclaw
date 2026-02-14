@@ -65,8 +65,15 @@ impl FeedExecutor {
                             },
                             Err(e) => {
                                 // Fall back to a single text item.
+                                // Mark as degraded (success=false) so the scheduler
+                                // knows this wasn't a clean run.
+                                tracing::warn!(
+                                    "Feed '{}' parse failed ({}), degraded to raw text",
+                                    feed.name,
+                                    e
+                                );
                                 FeedResult {
-                                    success: true,
+                                    success: false,
                                     items: vec![FeedItem {
                                         card_type: "article".into(),
                                         title: feed.name.clone(),
@@ -81,7 +88,7 @@ impl FeedExecutor {
                                         e
                                     )),
                                     metadata: None,
-                                    error: None,
+                                    error: Some(format!("parse_degraded: {e}")),
                                 }
                             }
                         }

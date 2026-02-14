@@ -16,6 +16,9 @@ use crate::aria::feed_registry::{AriaFeed, FeedRegistry};
 use crate::aria::registry::Registry;
 use crate::aria::types::FeedItem;
 
+/// Minimum refresh interval (60 seconds) to prevent busy-spinning.
+const MIN_INTERVAL_SECS: u64 = 60;
+
 /// A scheduled feed with its timer handle.
 struct ScheduledFeed {
     _feed_id: Uuid,
@@ -85,11 +88,21 @@ impl FeedScheduler {
     /// Schedule or reschedule a single feed.
     pub async fn sync_feed(&self, feed: AriaFeed) {
         let feed_id = feed.id;
-        let interval_secs = if feed.refresh_seconds > 0 {
+        let raw_interval = if feed.refresh_seconds > 0 {
             feed.refresh_seconds as u64
         } else {
             schedule_to_interval_secs(&feed.schedule)
         };
+        // Clamp to minimum interval to prevent busy-spinning on zero/tiny values.
+        let interval_secs = raw_interval.max(MIN_INTERVAL_SECS);
+        if raw_interval < MIN_INTERVAL_SECS {
+            tracing::warn!(
+                "Feed '{}' has interval {}s below minimum, clamped to {}s",
+                feed.name,
+                raw_interval,
+                MIN_INTERVAL_SECS
+            );
+        }
         let interval = Duration::from_secs(interval_secs);
 
         // Cancel existing schedule if any.
@@ -173,12 +186,30 @@ impl FeedScheduler {
                     }
 
                     tracing::info!(
-                        "Feed '{}' produced {} items",
+                        "Feed '{}' produced {} items (run {})",
                         current_feed.name,
-                        result.items.len()
+                        result.items.len(),
+                        run_id
                     );
                 } else if let Some(ref error) = result.error {
                     tracing::warn!("Feed '{}' execution failed: {}", current_feed.name, error);
+                } else if result.success && result.items.is_empty() {
+                    // No-op run: success but no items produced.
+                    tracing::debug!(
+                        "Feed '{}' returned 0 items (no-op run {})",
+                        current_feed.name,
+                        run_id
+                    );
+                }
+
+                // Update last_run_at on the feed regardless of result,
+                // so we can track when a feed was last attempted.
+                if let Err(e) = feed_registry.touch_last_run(feed_id).await {
+                    tracing::warn!(
+                        "Failed to update last_run_at for feed '{}': {}",
+                        current_feed.name,
+                        e
+                    );
                 }
 
                 // Wait for next interval.

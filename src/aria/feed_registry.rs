@@ -218,6 +218,21 @@ impl FeedRegistry {
         Ok(total_deleted)
     }
 
+    /// Update the `last_run_at` timestamp without inserting items.
+    ///
+    /// Called after every execution (including no-op runs) so we can track
+    /// when a feed was last attempted.
+    pub async fn touch_last_run(&self, feed_id: Uuid) -> RegistryResult<()> {
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                "UPDATE aria_feeds SET last_run_at = NOW(), updated_at = NOW() WHERE id = $1",
+                &[&feed_id],
+            )
+            .await?;
+        Ok(())
+    }
+
     /// List recent items for a feed, ordered newest-first.
     pub async fn list_items(&self, feed_id: Uuid, limit: i64) -> RegistryResult<Vec<AriaFeedItem>> {
         let client = self.pool.get().await?;

@@ -22,8 +22,9 @@ pub struct SseManager {
 impl SseManager {
     /// Create a new SSE manager.
     pub fn new() -> Self {
-        // Buffer 256 events; slow clients will miss events (acceptable for SSE with reconnect)
-        let (tx, _) = broadcast::channel(256);
+        // Buffer 1024 events; slow clients will miss events (acceptable for SSE with reconnect).
+        // Sized generously to reduce event loss during high-frequency streaming (text deltas).
+        let (tx, _) = broadcast::channel(1024);
         Self {
             tx,
             connection_count: Arc::new(AtomicU64::new(0)),

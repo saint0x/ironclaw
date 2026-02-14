@@ -32,13 +32,28 @@ pub fn compute_next_run(schedule: &CronSchedule, now_ms: i64) -> Option<i64> {
             Some(next)
         }
         CronSchedule::Cron { expr, tz } => {
-            let cron = Cron::new(expr).parse().ok()?;
+            let cron = match Cron::new(expr).parse() {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Invalid cron expression '{}': {}", expr, e);
+                    return None;
+                }
+            };
 
             let now_dt: DateTime<Utc> = DateTime::from_timestamp_millis(now_ms)?;
 
             // If timezone is specified, convert; otherwise use UTC.
             let next = if let Some(tz_str) = tz {
-                let tz: chrono_tz::Tz = tz_str.parse().ok()?;
+                let tz: chrono_tz::Tz = match tz_str.parse() {
+                    Ok(t) => t,
+                    Err(_) => {
+                        tracing::warn!(
+                            "Invalid timezone '{}' in cron schedule, job will not run",
+                            tz_str
+                        );
+                        return None;
+                    }
+                };
                 let now_local = now_dt.with_timezone(&tz);
                 let next_local = cron.find_next_occurrence(&now_local, false).ok()?;
                 next_local.with_timezone(&Utc)

@@ -176,11 +176,22 @@ pub enum SseEvent {
 
     /// Streaming text delta from the LLM.
     #[serde(rename = "text_delta")]
-    TextDelta { delta: String, text: String },
+    TextDelta {
+        delta: String,
+        text: String,
+        /// Run ID for correlating deltas to a specific turn.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+    },
 
     /// Streaming thinking delta.
     #[serde(rename = "thinking_delta")]
-    ThinkingDelta { delta: String },
+    ThinkingDelta {
+        delta: String,
+        /// Run ID for correlating deltas to a specific turn.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+    },
 
     /// Tool execution progress (intermediate output).
     #[serde(rename = "tool_progress")]
@@ -188,6 +199,9 @@ pub enum SseEvent {
         tool_call_id: String,
         name: String,
         partial_result: String,
+        /// Run ID for correlating progress to a specific turn.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
     },
 }
 

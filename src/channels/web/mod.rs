@@ -223,8 +223,15 @@ impl Channel for GatewayChannel {
                 parameters: serde_json::to_string_pretty(&parameters)
                     .unwrap_or_else(|_| parameters.to_string()),
             },
-            StatusUpdate::TextDelta { delta, text } => SseEvent::TextDelta { delta, text },
-            StatusUpdate::ThinkingDelta { delta } => SseEvent::ThinkingDelta { delta },
+            StatusUpdate::TextDelta { delta, text } => SseEvent::TextDelta {
+                delta,
+                text,
+                run_id: None,
+            },
+            StatusUpdate::ThinkingDelta { delta } => SseEvent::ThinkingDelta {
+                delta,
+                run_id: None,
+            },
             StatusUpdate::ToolProgress {
                 tool_call_id,
                 name,
@@ -233,6 +240,7 @@ impl Channel for GatewayChannel {
                 tool_call_id,
                 name,
                 partial_result,
+                run_id: None,
             },
             StatusUpdate::TurnStart {
                 run_id,

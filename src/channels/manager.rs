@@ -96,7 +96,18 @@ impl ChannelManager {
         if let Some(channel) = channels.get(channel_name) {
             channel.send_status(status, metadata).await
         } else {
-            // Silently ignore if channel not found (status is best-effort)
+            // Log warnings for critical statuses that should never be silently dropped.
+            if matches!(
+                &status,
+                StatusUpdate::ApprovalNeeded { .. }
+                    | StatusUpdate::TurnStart { .. }
+                    | StatusUpdate::TurnEnd { .. }
+            ) {
+                tracing::warn!(
+                    "Critical status update dropped: channel '{}' not found",
+                    channel_name
+                );
+            }
             Ok(())
         }
     }

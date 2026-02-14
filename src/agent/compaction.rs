@@ -91,10 +91,25 @@ impl ContextCompactor {
         let turns_to_remove = thread.turns.len() - keep_recent;
         let old_turns = &thread.turns[..turns_to_remove];
 
-        // Build messages for summarization
+        // Build messages for summarization, including tool calls and errors
+        // so the summary preserves what actions were taken.
         let mut to_summarize = Vec::new();
         for turn in old_turns {
             to_summarize.push(ChatMessage::user(&turn.user_input));
+
+            // Include tool call info so the summary knows what the agent did.
+            if !turn.tool_calls.is_empty() {
+                let tools: Vec<&str> = turn.tool_calls.iter().map(|t| t.name.as_str()).collect();
+                to_summarize.push(ChatMessage::assistant(format!(
+                    "[Tools executed: {}]",
+                    tools.join(", ")
+                )));
+            }
+
+            if let Some(ref error) = turn.error {
+                to_summarize.push(ChatMessage::assistant(format!("[Error: {}]", error)));
+            }
+
             if let Some(ref response) = turn.response {
                 to_summarize.push(ChatMessage::assistant(response));
             }
