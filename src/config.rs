@@ -22,6 +22,7 @@ pub struct Config {
     pub builder: BuilderModeConfig,
     pub heartbeat: HeartbeatConfig,
     pub sandbox: SandboxModeConfig,
+    pub aria: AriaConfig,
 }
 
 impl Config {
@@ -43,6 +44,7 @@ impl Config {
             builder: BuilderModeConfig::from_env()?,
             heartbeat: HeartbeatConfig::from_env()?,
             sandbox: SandboxModeConfig::from_env()?,
+            aria: AriaConfig::from_env()?,
         })
     }
 }
@@ -945,6 +947,88 @@ impl SandboxModeConfig {
             auto_pull_image: self.auto_pull_image,
             proxy_port: 0, // Auto-assign
         }
+    }
+}
+
+/// Aria registry and SDK configuration.
+#[derive(Debug, Clone)]
+pub struct AriaConfig {
+    /// Whether the Aria registry system is enabled.
+    pub enabled: bool,
+    /// Whether to mount SDK API routes on the gateway server.
+    pub sdk_enabled: bool,
+    /// Whether to start the task executor polling loop.
+    pub task_executor_enabled: bool,
+    /// Task executor poll interval in seconds.
+    pub task_poll_interval_secs: u64,
+    /// Maximum concurrent task executions.
+    pub task_concurrency: usize,
+    /// Whether to start the cron service.
+    pub cron_enabled: bool,
+    /// Whether to start the feed scheduler.
+    pub feeds_enabled: bool,
+}
+
+impl Default for AriaConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sdk_enabled: true,
+            task_executor_enabled: true,
+            task_poll_interval_secs: 5,
+            task_concurrency: 10,
+            cron_enabled: true,
+            feeds_enabled: true,
+        }
+    }
+}
+
+impl AriaConfig {
+    fn from_env() -> Result<Self, ConfigError> {
+        Ok(Self {
+            enabled: optional_env("ARIA_ENABLED")?
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|e| ConfigError::InvalidValue {
+                    key: "ARIA_ENABLED".to_string(),
+                    message: format!("must be 'true' or 'false': {e}"),
+                })?
+                .unwrap_or(true),
+            sdk_enabled: optional_env("ARIA_SDK_ENABLED")?
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|e| ConfigError::InvalidValue {
+                    key: "ARIA_SDK_ENABLED".to_string(),
+                    message: format!("must be 'true' or 'false': {e}"),
+                })?
+                .unwrap_or(true),
+            task_executor_enabled: optional_env("ARIA_TASK_EXECUTOR_ENABLED")?
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|e| ConfigError::InvalidValue {
+                    key: "ARIA_TASK_EXECUTOR_ENABLED".to_string(),
+                    message: format!("must be 'true' or 'false': {e}"),
+                })?
+                .unwrap_or(true),
+            task_poll_interval_secs: parse_optional_env("ARIA_TASK_POLL_INTERVAL_SECS", 5)?,
+            task_concurrency: parse_optional_env("ARIA_TASK_CONCURRENCY", 10)?,
+            cron_enabled: optional_env("ARIA_CRON_ENABLED")?
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|e| ConfigError::InvalidValue {
+                    key: "ARIA_CRON_ENABLED".to_string(),
+                    message: format!("must be 'true' or 'false': {e}"),
+                })?
+                .unwrap_or(true),
+            feeds_enabled: optional_env("ARIA_FEEDS_ENABLED")?
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|e| ConfigError::InvalidValue {
+                    key: "ARIA_FEEDS_ENABLED".to_string(),
+                    message: format!("must be 'true' or 'false': {e}"),
+                })?
+                .unwrap_or(true),
+        })
     }
 }
 

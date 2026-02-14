@@ -227,6 +227,21 @@ async fn main() -> anyhow::Result<()> {
         Some(Arc::new(store))
     };
 
+    // Initialize Aria registries if database is available and Aria is enabled
+    let aria_registries = if config.aria.enabled {
+        if let Some(ref store) = store {
+            let registries = Arc::new(ironclaw::aria::AriaRegistries::new(store.pool()));
+            tracing::info!("Aria registries initialized (11 registries)");
+            Some(registries)
+        } else {
+            tracing::info!("Aria disabled (no database)");
+            None
+        }
+    } else {
+        tracing::info!("Aria disabled by configuration");
+        None
+    };
+
     // Initialize LLM provider (clone session so we can reuse it for embeddings)
     let llm = create_llm_provider(&config.llm, session.clone())?;
     tracing::info!("LLM provider initialized: {}", llm.model_name());
@@ -667,6 +682,17 @@ async fn main() -> anyhow::Result<()> {
                 http_config.host,
                 http_config.port
             );
+        }
+    }
+
+    // Add Aria SDK routes if enabled
+    if let Some(ref registries) = aria_registries {
+        if config.aria.sdk_enabled {
+            let sdk_state = ironclaw::sdk::routes::SdkState {
+                registries: Arc::clone(registries),
+            };
+            webhook_routes.push(ironclaw::sdk::routes::router(sdk_state));
+            tracing::info!("Aria SDK routes mounted (all 11 registries)");
         }
     }
 

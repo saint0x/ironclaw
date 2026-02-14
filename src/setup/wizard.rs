@@ -773,10 +773,10 @@ impl SetupWizard {
         self.settings.onboard_completed = true;
 
         self.settings.save().map_err(|e| {
-            SetupError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to save settings: {}", e),
-            ))
+            SetupError::Io(std::io::Error::other(format!(
+                "Failed to save settings: {}",
+                e
+            )))
         })?;
 
         println!();

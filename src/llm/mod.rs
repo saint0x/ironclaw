@@ -19,6 +19,9 @@ pub use provider::{
 pub use reasoning::{ActionPlan, Reasoning, ReasoningContext, RespondResult, ToolSelection};
 pub use session::{SessionConfig, SessionManager, create_session_manager};
 
+#[cfg(test)]
+pub mod tests;
+
 use std::sync::Arc;
 
 use crate::config::{LlmConfig, NearAiApiMode};

@@ -31,6 +31,15 @@ pub struct SafetyLayer {
     config: SafetyConfig,
 }
 
+impl Default for SafetyLayer {
+    fn default() -> Self {
+        Self::new(&SafetyConfig {
+            max_output_length: 100_000,
+            injection_check_enabled: true,
+        })
+    }
+}
+
 impl SafetyLayer {
     /// Create a new safety layer with the given configuration.
     pub fn new(config: &SafetyConfig) -> Self {
