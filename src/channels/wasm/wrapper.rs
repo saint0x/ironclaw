@@ -1858,6 +1858,37 @@ fn status_to_wit(status: &StatusUpdate, metadata: &serde_json::Value) -> wit_cha
             message: format!("Approval needed: {} - {}", tool_name, description),
             metadata_json,
         },
+        // New event types — map to Thinking for WIT compat until WIT schema is extended.
+        StatusUpdate::TextDelta { delta, .. } | StatusUpdate::ThinkingDelta { delta, .. } => {
+            wit_channel::StatusUpdate {
+                status: wit_channel::StatusType::Thinking,
+                message: delta.clone(),
+                metadata_json,
+            }
+        }
+        StatusUpdate::ToolProgress {
+            name,
+            partial_result,
+            ..
+        } => wit_channel::StatusUpdate {
+            status: wit_channel::StatusType::Thinking,
+            message: format!("{}: {}", name, partial_result),
+            metadata_json,
+        },
+        StatusUpdate::TurnStart { model, .. } => wit_channel::StatusUpdate {
+            status: wit_channel::StatusType::Thinking,
+            message: format!("Turn started ({})", model),
+            metadata_json,
+        },
+        StatusUpdate::TurnEnd {
+            stop_reason,
+            duration_ms,
+            ..
+        } => wit_channel::StatusUpdate {
+            status: wit_channel::StatusType::Done,
+            message: format!("Turn ended ({}, {}ms)", stop_reason, duration_ms),
+            metadata_json,
+        },
     }
 }
 

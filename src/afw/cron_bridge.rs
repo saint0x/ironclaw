@@ -233,8 +233,6 @@ pub enum BridgeError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn cron_func_name_prefix() {
         let name = format!("cron-func:{}", "my-check");

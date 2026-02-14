@@ -472,6 +472,40 @@ impl Channel for ReplChannel {
                 eprintln!("  {bot_border}");
                 eprintln!();
             }
+            StatusUpdate::TextDelta { delta, .. } => {
+                print!("{delta}");
+                let _ = io::stdout().flush();
+            }
+            StatusUpdate::ThinkingDelta { delta } => {
+                if debug {
+                    eprint!("\x1b[90m{delta}\x1b[0m");
+                }
+            }
+            StatusUpdate::ToolProgress {
+                name,
+                partial_result,
+                ..
+            } => {
+                if debug {
+                    eprintln!("    \x1b[90m{name}: {partial_result}\x1b[0m");
+                }
+            }
+            StatusUpdate::TurnStart { model, .. } => {
+                if debug {
+                    eprintln!("  \x1b[90m\u{25CB} turn started ({model})\x1b[0m");
+                }
+            }
+            StatusUpdate::TurnEnd {
+                stop_reason,
+                duration_ms,
+                ..
+            } => {
+                if debug {
+                    eprintln!(
+                        "  \x1b[90m\u{25CF} turn ended ({stop_reason}, {duration_ms}ms)\x1b[0m"
+                    );
+                }
+            }
         }
         Ok(())
     }

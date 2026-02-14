@@ -350,6 +350,10 @@ impl LlmProvider for NearAiProvider {
                         finish_reason: FinishReason::Stop,
                         input_tokens: usage.input_tokens,
                         output_tokens: usage.output_tokens,
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        thinking_tokens: None,
+                        thinking: None,
                     });
                 }
 
@@ -367,6 +371,10 @@ impl LlmProvider for NearAiProvider {
                     finish_reason: FinishReason::Stop,
                     input_tokens: 0,
                     output_tokens: 0,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    thinking_tokens: None,
+                    thinking: None,
                 });
             }
             Err(e) => return Err(e),
@@ -428,6 +436,10 @@ impl LlmProvider for NearAiProvider {
             finish_reason: FinishReason::Stop,
             input_tokens: response.usage.input_tokens,
             output_tokens: response.usage.output_tokens,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking_tokens: None,
+            thinking: None,
         })
     }
 
@@ -490,6 +502,10 @@ impl LlmProvider for NearAiProvider {
                         finish_reason,
                         input_tokens: usage.input_tokens,
                         output_tokens: usage.output_tokens,
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        thinking_tokens: None,
+                        thinking: None,
                     });
                 }
 
@@ -507,6 +523,10 @@ impl LlmProvider for NearAiProvider {
                     finish_reason: FinishReason::Stop,
                     input_tokens: 0,
                     output_tokens: 0,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    thinking_tokens: None,
+                    thinking: None,
                 });
             }
             Err(e) => return Err(e),
@@ -566,6 +586,10 @@ impl LlmProvider for NearAiProvider {
             finish_reason,
             input_tokens: response.usage.input_tokens,
             output_tokens: response.usage.output_tokens,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking_tokens: None,
+            thinking: None,
         })
     }
 

@@ -27,6 +27,10 @@ impl LlmProvider for MockLlmProvider {
             input_tokens: 0,
             output_tokens: 0,
             finish_reason: FinishReason::Stop,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking_tokens: None,
+            thinking: None,
         })
     }
 
@@ -40,6 +44,10 @@ impl LlmProvider for MockLlmProvider {
             input_tokens: 0,
             output_tokens: 0,
             finish_reason: FinishReason::Stop,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking_tokens: None,
+            thinking: None,
         })
     }
 }

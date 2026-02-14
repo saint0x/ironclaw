@@ -145,6 +145,14 @@ pub struct CompletionResponse {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub finish_reason: FinishReason,
+    /// Tokens read from prompt cache (Anthropic).
+    pub cache_read_tokens: Option<u32>,
+    /// Tokens written to prompt cache.
+    pub cache_write_tokens: Option<u32>,
+    /// Tokens consumed by extended thinking.
+    pub thinking_tokens: Option<u32>,
+    /// Extended thinking content (if model supports it).
+    pub thinking: Option<String>,
 }
 
 /// Why the completion finished.
@@ -155,6 +163,68 @@ pub enum FinishReason {
     ToolUse,
     ContentFilter,
     Unknown,
+}
+
+impl std::fmt::Display for FinishReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FinishReason::Stop => write!(f, "stop"),
+            FinishReason::Length => write!(f, "length"),
+            FinishReason::ToolUse => write!(f, "tool_use"),
+            FinishReason::ContentFilter => write!(f, "content_filter"),
+            FinishReason::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+/// A streaming event from the LLM during generation.
+///
+/// Maps to the Anthropic Messages API streaming events. These are emitted
+/// via the AgentEventBus for real-time UI updates.
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// New assistant message started.
+    MessageStart { message_id: String, model: String },
+
+    /// A new content block started.
+    ContentBlockStart {
+        index: usize,
+        block_type: StreamBlockType,
+    },
+
+    /// Streaming delta for a content block.
+    ContentBlockDelta { index: usize, delta: StreamDelta },
+
+    /// A content block finished.
+    ContentBlockStop { index: usize },
+
+    /// Message-level usage update.
+    MessageDelta {
+        output_tokens: u32,
+        stop_reason: Option<FinishReason>,
+    },
+
+    /// Message generation finished.
+    MessageStop,
+}
+
+/// Type of content block in the stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamBlockType {
+    Text,
+    ToolUse { id: String, name: String },
+    Thinking,
+}
+
+/// Delta content within a streaming content block.
+#[derive(Debug, Clone)]
+pub enum StreamDelta {
+    /// Text content delta.
+    Text(String),
+    /// Tool use input JSON delta (streamed JSON args).
+    InputJson(String),
+    /// Extended thinking delta.
+    Thinking(String),
 }
 
 /// Definition of a tool for the LLM.
@@ -234,6 +304,14 @@ pub struct ToolCompletionResponse {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub finish_reason: FinishReason,
+    /// Tokens read from prompt cache.
+    pub cache_read_tokens: Option<u32>,
+    /// Tokens written to prompt cache.
+    pub cache_write_tokens: Option<u32>,
+    /// Tokens consumed by extended thinking.
+    pub thinking_tokens: Option<u32>,
+    /// Extended thinking content (if model supports it).
+    pub thinking: Option<String>,
 }
 
 /// Trait for LLM providers.

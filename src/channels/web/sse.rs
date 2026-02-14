@@ -81,6 +81,12 @@ impl SseManager {
                     SseEvent::ApprovalNeeded { .. } => "approval_needed",
                     SseEvent::Error { .. } => "error",
                     SseEvent::Heartbeat => "heartbeat",
+                    SseEvent::AgentEvent { .. } => "agent_event",
+                    SseEvent::TurnStart { .. } => "turn_start",
+                    SseEvent::TurnEnd { .. } => "turn_end",
+                    SseEvent::TextDelta { .. } => "text_delta",
+                    SseEvent::ThinkingDelta { .. } => "thinking_delta",
+                    SseEvent::ToolProgress { .. } => "tool_progress",
                 };
                 Ok(Event::default().event(event_type).data(data))
             });
