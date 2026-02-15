@@ -129,3 +129,53 @@ pub struct KvQueryParams {
 pub struct CronJobIdUpdate {
     pub cron_job_id: String,
 }
+
+/// Execute request for teams, agents, and pipelines.
+#[derive(Debug, Deserialize)]
+pub struct ExecuteRequest {
+    /// The input message or prompt to execute with.
+    pub input: String,
+    /// Optional variables passed as context.
+    #[serde(default)]
+    pub variables: Option<serde_json::Value>,
+}
+
+/// Execute response returned from team/agent/pipeline runs.
+#[derive(Debug, Serialize)]
+pub struct ExecuteResponse {
+    pub run_id: Uuid,
+    pub status: String,
+    pub output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+/// Container execution request (runs a command in the sandbox).
+#[derive(Debug, Deserialize)]
+pub struct ContainerExecRequest {
+    /// The command to execute inside the container.
+    pub command: String,
+    /// Working directory inside the container (defaults to /workspace).
+    #[serde(default = "default_cwd")]
+    pub cwd: String,
+    /// Optional environment variables.
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+}
+
+fn default_cwd() -> String {
+    "/workspace".to_string()
+}
+
+/// Container execution response.
+#[derive(Debug, Serialize)]
+pub struct ContainerExecResponse {
+    pub exit_code: i64,
+    pub stdout: String,
+    pub stderr: String,
+    pub duration_ms: u64,
+    pub truncated: bool,
+}

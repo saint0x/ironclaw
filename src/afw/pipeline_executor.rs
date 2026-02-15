@@ -11,8 +11,10 @@ use uuid::Uuid;
 
 use crate::aria::pipeline_registry::{AriaPipeline, PipelineRegistry};
 use crate::aria::types::{PipelineStep, RetryPolicy};
+use crate::context::JobContext;
 use crate::llm::{ChatMessage, CompletionRequest, LlmProvider};
 use crate::safety::SafetyLayer;
+use crate::tools::ToolRegistry;
 
 /// Result of a pipeline execution.
 #[derive(Debug, Clone)]
@@ -49,6 +51,7 @@ pub struct PipelineExecutor {
     llm: Arc<dyn LlmProvider>,
     _safety: Arc<SafetyLayer>,
     pipeline_registry: Arc<PipelineRegistry>,
+    tool_registry: Option<Arc<ToolRegistry>>,
 }
 
 impl PipelineExecutor {
@@ -61,7 +64,18 @@ impl PipelineExecutor {
             llm,
             _safety: safety,
             pipeline_registry,
+            tool_registry: None,
         }
+    }
+
+    /// Attach a tool registry for direct tool dispatch in pipeline steps.
+    ///
+    /// When a step's `execute` field starts with `"tool:"`, the executor will
+    /// look up the named tool and execute it directly instead of prompting
+    /// the LLM.
+    pub fn with_tools(mut self, tool_registry: Arc<ToolRegistry>) -> Self {
+        self.tool_registry = Some(tool_registry);
+        self
     }
 
     /// Execute a pipeline with the given input variables.
@@ -287,13 +301,92 @@ impl PipelineExecutor {
     }
 
     /// Inner step execution — determines what to run based on the `execute` field.
+    ///
+    /// The `execute` field supports the following dispatch patterns:
+    /// - `"tool:<name>"` — execute a registered tool directly (no LLM)
+    /// - `"agent:<prompt>"` — run an LLM completion with the step params as prompt
+    /// - Anything else — treated as an agent/LLM prompt (backwards compatible)
     async fn run_step_inner(
         &self,
         step: &PipelineStep,
         _completed: &HashMap<String, StepResult>,
         variables: &serde_json::Value,
     ) -> Result<String, PipelineError> {
-        // Build the prompt from step params + variables context.
+        let timeout = Duration::from_secs(step.timeout_secs.unwrap_or(300));
+
+        // Check for tool dispatch: "tool:tool_name"
+        if let Some(tool_name) = step.execute.strip_prefix("tool:") {
+            return self
+                .run_tool_step(tool_name.trim(), step, variables, timeout)
+                .await;
+        }
+
+        // Default: LLM-based execution (covers "agent:*" and freeform).
+        self.run_llm_step(step, variables, timeout).await
+    }
+
+    /// Execute a pipeline step by calling a registered tool directly.
+    async fn run_tool_step(
+        &self,
+        tool_name: &str,
+        step: &PipelineStep,
+        variables: &serde_json::Value,
+        timeout: Duration,
+    ) -> Result<String, PipelineError> {
+        let registry = self
+            .tool_registry
+            .as_ref()
+            .ok_or_else(|| PipelineError::StepFailed {
+                step: step.name.clone(),
+                reason: format!("step uses 'tool:{tool_name}' but no tool registry is attached"),
+            })?;
+
+        let tool = registry
+            .get(tool_name)
+            .await
+            .ok_or_else(|| PipelineError::StepFailed {
+                step: step.name.clone(),
+                reason: format!("tool '{tool_name}' not found in registry"),
+            })?;
+
+        // Merge step params with pipeline variables for the tool call.
+        let mut params = step.params.clone();
+        if let (serde_json::Value::Object(p), serde_json::Value::Object(v)) =
+            (&mut params, variables)
+        {
+            for (k, val) in v {
+                p.entry(k.clone()).or_insert_with(|| val.clone());
+            }
+        }
+
+        // Create a minimal job context for tool execution.
+        let ctx = JobContext::new(&step.name, format!("Pipeline step: {}", step.name));
+
+        let result = tokio::time::timeout(timeout, tool.execute(params, &ctx))
+            .await
+            .map_err(|_| PipelineError::StepFailed {
+                step: step.name.clone(),
+                reason: format!("tool '{tool_name}' timed out after {timeout:?}"),
+            })?
+            .map_err(|e| PipelineError::StepFailed {
+                step: step.name.clone(),
+                reason: format!("tool '{tool_name}' failed: {e}"),
+            })?;
+
+        // Convert the tool result to a string for the pipeline context.
+        match &result.result {
+            serde_json::Value::String(s) => Ok(s.clone()),
+            other => Ok(serde_json::to_string(other).unwrap_or_default()),
+        }
+    }
+
+    /// Execute a pipeline step by prompting the LLM.
+    async fn run_llm_step(
+        &self,
+        step: &PipelineStep,
+        variables: &serde_json::Value,
+        timeout: Duration,
+    ) -> Result<String, PipelineError> {
         let params_str = serde_json::to_string_pretty(&step.params).unwrap_or_default();
         let vars_str = serde_json::to_string_pretty(variables).unwrap_or_default();
 
@@ -308,7 +401,6 @@ impl PipelineExecutor {
         let messages = vec![ChatMessage::user(&prompt)];
         let request = CompletionRequest::new(messages);
 
-        let timeout = Duration::from_secs(step.timeout_secs.unwrap_or(300));
         let response = tokio::time::timeout(timeout, self.llm.complete(request))
             .await
             .map_err(|_| PipelineError::StepFailed {

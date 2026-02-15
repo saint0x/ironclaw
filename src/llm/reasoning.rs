@@ -373,15 +373,58 @@ Respond with a JSON plan in this format:
         let tools_section = if context.available_tools.is_empty() {
             String::new()
         } else {
-            let tool_list: Vec<String> = context
-                .available_tools
-                .iter()
-                .map(|t| format!("  - {}: {}", t.name, t.description))
-                .collect();
-            format!(
-                "\n\n## Available Tools\nYou have access to these tools:\n{}\n\nCall tools when they would help accomplish the task.",
-                tool_list.join("\n")
-            )
+            // Categorize tools for clarity.
+            let mut core = Vec::new();
+            let mut memory = Vec::new();
+            let mut dev = Vec::new();
+            let mut extension = Vec::new();
+            let mut other = Vec::new();
+
+            for t in &context.available_tools {
+                match t.name.as_str() {
+                    "echo" | "time" | "json_format" | "http" => {
+                        core.push(format!("  - **{}**: {}", t.name, t.description));
+                    }
+                    n if n.starts_with("memory_") => {
+                        memory.push(format!("  - **{}**: {}", t.name, t.description));
+                    }
+                    "shell" | "read_file" | "write_file" | "list_dir" | "apply_patch"
+                    | "build_software" => {
+                        dev.push(format!("  - **{}**: {}", t.name, t.description));
+                    }
+                    n if n.starts_with("tool_") => {
+                        extension.push(format!("  - **{}**: {}", t.name, t.description));
+                    }
+                    _ => {
+                        other.push(format!("  - **{}**: {}", t.name, t.description));
+                    }
+                }
+            }
+
+            let mut sections = Vec::new();
+            if !core.is_empty() {
+                sections.push(format!("**Core:**\n{}", core.join("\n")));
+            }
+            if !memory.is_empty() {
+                sections.push(format!("**Memory (workspace):**\n{}", memory.join("\n")));
+            }
+            if !dev.is_empty() {
+                sections.push(format!(
+                    "**Development (require approval):**\n{}",
+                    dev.join("\n")
+                ));
+            }
+            if !extension.is_empty() {
+                sections.push(format!(
+                    "**Extension management:**\n{}",
+                    extension.join("\n")
+                ));
+            }
+            if !other.is_empty() {
+                sections.push(format!("**Other:**\n{}", other.join("\n")));
+            }
+
+            format!("\n\n## Available Tools\n\n{}\n", sections.join("\n\n"))
         };
 
         // Include workspace identity prompt if available
@@ -392,26 +435,61 @@ Respond with a JSON plan in this format:
         };
 
         format!(
-            r#"You are NEAR AI Agent, an autonomous assistant.
+            r#"You are IronClaw, a secure personal AI assistant powered by the Aria runtime.
+
+## Core Principles
+- Protect user data — everything is encrypted and local-first
+- Be direct and concise
+- Use tools proactively when they help accomplish the task
+- Never fabricate information — search memory or ask the user
 
 ## Response Format
 
-If you need to think through a problem, wrap your thinking in <thinking> tags. Everything outside these tags goes directly to the user.
+If you need to reason through a problem, wrap your thinking in <thinking> tags.
+Everything outside these tags goes directly to the user.
 
-Example:
 <thinking>
-Let me consider the options...
-Option 1: ...
-Option 2: ...
-I'll go with option 1.
+Internal reasoning goes here...
 </thinking>
-Here's the solution: [actual response to user]
+Visible response goes here.
+
+## Memory System
+
+You have a persistent workspace for long-term memory. **Always search memory before
+answering questions about prior work, preferences, or context.**
+
+- Use `memory_search` to find relevant information before answering
+- Use `memory_write` to persist important facts, decisions, and user preferences
+- Use `memory_read` to read a specific file by path
+- Use `memory_tree` to browse the workspace structure
+
+The workspace uses hybrid search (keyword + semantic) so natural language queries work well.
+
+## Tool Approval
+
+Some tools require user approval before execution:
+- **shell**: Runs shell commands on the host
+- **http**: Makes outbound HTTP requests
+- **write_file** / **apply_patch**: Modifies files on disk
+- **build_software**: Creates new software artifacts
+
+When you call an approval-required tool, the user will be prompted. If they approve
+with `--always`, subsequent calls to that tool in this session won't re-prompt.
+
+## Extension Management
+
+You can discover and install new capabilities at runtime:
+- `tool_search`: Find tools from the MCP registry or WASM catalog
+- `tool_install`: Install a new tool (MCP server or WASM module)
+- `tool_auth`: Authenticate a tool that needs credentials
+- `tool_activate` / `tool_remove` / `tool_list`: Manage installed tools
 
 ## Guidelines
 - Be concise and direct
 - Use markdown formatting where helpful
 - For code, use appropriate code blocks with language tags
-- Call tools when they would help accomplish the task{}
+- If the user asks about something you discussed before, **search memory first**
+- If a task requires multiple steps, explain your plan before executing{}
 
 The user sees ONLY content outside <thinking> tags.{}"#,
             tools_section, identity_section

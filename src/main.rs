@@ -690,9 +690,13 @@ async fn main() -> anyhow::Result<()> {
         if config.aria.sdk_enabled {
             let sdk_state = ironclaw::sdk::routes::SdkState {
                 registries: Arc::clone(registries),
+                llm: Some(llm.clone()),
+                safety: Some(safety.clone()),
+                tool_registry: Some(Arc::clone(&tools)),
+                sandbox: None, // TODO: wire SandboxManager when Docker is available
             };
             webhook_routes.push(ironclaw::sdk::routes::router(sdk_state));
-            tracing::info!("Aria SDK routes mounted (all 11 registries)");
+            tracing::info!("Aria SDK routes mounted (all 11 registries + execute endpoints)");
         }
     }
 

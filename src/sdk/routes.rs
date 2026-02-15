@@ -16,12 +16,24 @@ use uuid::Uuid;
 
 use crate::aria::AriaRegistries;
 use crate::aria::registry::{Registry, RegistryError};
+use crate::llm::LlmProvider;
+use crate::safety::SafetyLayer;
+use crate::sandbox::SandboxManager;
 use crate::sdk::types::*;
+use crate::tools::ToolRegistry;
 
 /// Shared state for all SDK routes.
 #[derive(Clone)]
 pub struct SdkState {
     pub registries: Arc<AriaRegistries>,
+    /// LLM provider for execute endpoints (optional; execute routes return 501 if absent).
+    pub llm: Option<Arc<dyn LlmProvider>>,
+    /// Safety layer for execute endpoints.
+    pub safety: Option<Arc<SafetyLayer>>,
+    /// Tool registry for pipeline step dispatch.
+    pub tool_registry: Option<Arc<ToolRegistry>>,
+    /// Sandbox manager for container execution (Quilt).
+    pub sandbox: Option<Arc<SandboxManager>>,
 }
 
 /// Build the full SDK router.
@@ -208,6 +220,7 @@ fn agent_routes() -> Router<SdkState> {
     Router::new()
         .route("/api/aria/agents", post(agent_upload).get(agent_list))
         .route("/api/aria/agents/{id}", get(agent_get).delete(agent_delete))
+        .route("/api/aria/agents/{id}/execute", post(agent_execute))
         .route("/api/aria/agents/name/{name}", get(agent_get_by_name))
 }
 
@@ -280,6 +293,61 @@ async fn agent_get_by_name(
         .await
         .map_err(registry_err)?;
     ok(entry)
+}
+
+async fn agent_execute(
+    State(state): State<SdkState>,
+    Path(id): Path<String>,
+    Json(input): Json<ExecuteRequest>,
+) -> ApiResult<ExecuteResponse> {
+    let id = parse_uuid(&id)?;
+
+    let llm = state.llm.as_ref().ok_or_else(|| {
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ErrorResponse::with_code(
+                "Execute not available (no LLM configured)",
+                "NOT_CONFIGURED",
+            )),
+        )
+    })?;
+
+    let agent = state
+        .registries
+        .agents
+        .get(id)
+        .await
+        .map_err(registry_err)?;
+
+    // Build messages: system prompt from agent config + user input.
+    let mut messages = Vec::new();
+    if !agent.system_prompt.is_empty() {
+        messages.push(crate::llm::ChatMessage::system(&agent.system_prompt));
+    }
+    messages.push(crate::llm::ChatMessage::user(&input.input));
+
+    let start = std::time::Instant::now();
+    let request = crate::llm::CompletionRequest::new(messages);
+    let response = llm.complete(request).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse::new(e.to_string())),
+        )
+    })?;
+
+    ok(ExecuteResponse {
+        run_id: Uuid::new_v4(),
+        status: "completed".into(),
+        output: Some(response.content),
+        error: None,
+        duration_ms: start.elapsed().as_millis() as u64,
+        details: Some(serde_json::json!({
+            "agent": agent.name,
+            "model": agent.model,
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+        })),
+    })
 }
 
 async fn agent_delete(
@@ -885,6 +953,7 @@ fn team_routes() -> Router<SdkState> {
     Router::new()
         .route("/api/aria/teams", post(team_upload).get(team_list))
         .route("/api/aria/teams/{id}", get(team_get).delete(team_delete))
+        .route("/api/aria/teams/{id}/execute", post(team_execute))
         .route("/api/aria/teams/name/{name}", get(team_get_by_name))
 }
 
@@ -954,6 +1023,93 @@ async fn team_get_by_name(
     ok(entry)
 }
 
+async fn team_execute(
+    State(state): State<SdkState>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<ExecuteRequest>,
+) -> ApiResult<ExecuteResponse> {
+    let id = parse_uuid(&id)?;
+    let tid = tenant_id(&headers);
+
+    let llm = state.llm.as_ref().ok_or_else(|| {
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ErrorResponse::with_code(
+                "Execute not available (no LLM configured)",
+                "NOT_CONFIGURED",
+            )),
+        )
+    })?;
+    let safety = state.safety.as_ref().ok_or_else(|| {
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ErrorResponse::with_code(
+                "Execute not available (no safety layer)",
+                "NOT_CONFIGURED",
+            )),
+        )
+    })?;
+
+    // Load team and its agents.
+    let team = state.registries.teams.get(id).await.map_err(registry_err)?;
+    let mut agents = Vec::new();
+    // Members can be string names or objects with a "name" field.
+    let member_names: Vec<String> = team
+        .members
+        .iter()
+        .filter_map(|m| match m {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Object(obj) => {
+                obj.get("name").and_then(|n| n.as_str()).map(String::from)
+            }
+            _ => None,
+        })
+        .collect();
+    for name in &member_names {
+        match state.registries.agents.get_by_name(&tid, name).await {
+            Ok(agent) => agents.push(agent),
+            Err(e) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse::with_code(
+                        format!("Agent '{}' not found: {}", name, e),
+                        "AGENT_NOT_FOUND",
+                    )),
+                ));
+            }
+        }
+    }
+
+    let executor = crate::afw::TeamExecutor::new(Arc::clone(llm), Arc::clone(safety));
+    let result = executor
+        .execute(&team, &agents, &input.input)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse::new(e.to_string())),
+            )
+        })?;
+
+    ok(ExecuteResponse {
+        run_id: Uuid::new_v4(),
+        status: "completed".into(),
+        output: Some(result.final_output),
+        error: None,
+        duration_ms: result.duration.as_millis() as u64,
+        details: Some(serde_json::json!({
+            "mode": format!("{:?}", result.mode),
+            "total_turns": result.total_turns,
+            "agent_outputs": result.agent_outputs.iter().map(|a| serde_json::json!({
+                "agent": a.agent_name,
+                "output": a.output,
+                "turn": a.turn_number,
+            })).collect::<Vec<_>>(),
+        })),
+    })
+}
+
 async fn team_delete(
     State(state): State<SdkState>,
     Path(id): Path<String>,
@@ -983,6 +1139,7 @@ fn pipeline_routes() -> Router<SdkState> {
             get(pipeline_get).delete(pipeline_delete),
         )
         .route("/api/aria/pipelines/{id}/run", post(pipeline_create_run))
+        .route("/api/aria/pipelines/{id}/execute", post(pipeline_execute))
         .route("/api/aria/pipelines/{id}/runs", get(pipeline_list_runs))
         .route("/api/aria/pipelines/runs/{run_id}", get(pipeline_get_run))
         .route("/api/aria/pipelines/name/{name}", get(pipeline_get_by_name))
@@ -1106,6 +1263,76 @@ async fn pipeline_get_run(
     ok(run)
 }
 
+async fn pipeline_execute(
+    State(state): State<SdkState>,
+    Path(id): Path<String>,
+    Json(input): Json<ExecuteRequest>,
+) -> ApiResult<ExecuteResponse> {
+    let id = parse_uuid(&id)?;
+
+    let llm = state.llm.as_ref().ok_or_else(|| {
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ErrorResponse::with_code(
+                "Execute not available (no LLM configured)",
+                "NOT_CONFIGURED",
+            )),
+        )
+    })?;
+    let safety = state.safety.as_ref().ok_or_else(|| {
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ErrorResponse::with_code(
+                "Execute not available (no safety layer)",
+                "NOT_CONFIGURED",
+            )),
+        )
+    })?;
+
+    let pipeline = state
+        .registries
+        .pipelines
+        .get(id)
+        .await
+        .map_err(registry_err)?;
+
+    let executor = crate::afw::PipelineExecutor::new(
+        Arc::clone(llm),
+        Arc::clone(safety),
+        Arc::clone(&state.registries.pipelines),
+    );
+
+    let variables = input
+        .variables
+        .unwrap_or_else(|| serde_json::json!({ "input": input.input }));
+
+    let result = executor.execute(&pipeline, variables).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse::new(e.to_string())),
+        )
+    })?;
+
+    let status_str = match result.status {
+        crate::afw::pipeline_executor::PipelineStatus::Completed => "completed",
+        crate::afw::pipeline_executor::PipelineStatus::Failed => "failed",
+        crate::afw::pipeline_executor::PipelineStatus::PartialSuccess => "partial",
+    };
+
+    ok(ExecuteResponse {
+        run_id: result.run_id,
+        status: status_str.into(),
+        output: result.final_output,
+        error: if status_str == "failed" {
+            Some("one or more steps failed".into())
+        } else {
+            None
+        },
+        duration_ms: result.duration.as_millis() as u64,
+        details: Some(serde_json::to_value(&result.step_results).unwrap_or_default()),
+    })
+}
+
 async fn pipeline_delete(
     State(state): State<SdkState>,
     Path(id): Path<String>,
@@ -1138,6 +1365,7 @@ fn container_routes() -> Router<SdkState> {
             "/api/aria/containers/{id}/runtime",
             patch(container_update_runtime),
         )
+        .route("/api/aria/containers/{id}/exec", post(container_exec))
         .route(
             "/api/aria/containers/name/{name}",
             get(container_get_by_name),
@@ -1237,6 +1465,51 @@ async fn container_update_runtime(
         .await
         .map_err(registry_err)?;
     ok(entry)
+}
+
+async fn container_exec(
+    State(state): State<SdkState>,
+    Path(id): Path<String>,
+    Json(input): Json<ContainerExecRequest>,
+) -> ApiResult<ContainerExecResponse> {
+    let id = parse_uuid(&id)?;
+
+    // Verify the container exists in registry.
+    let _container = state
+        .registries
+        .containers
+        .get(id)
+        .await
+        .map_err(registry_err)?;
+
+    let sandbox = state.sandbox.as_ref().ok_or_else(|| {
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ErrorResponse::with_code(
+                "Container execution not available (no sandbox configured)",
+                "NOT_CONFIGURED",
+            )),
+        )
+    })?;
+
+    let cwd = std::path::PathBuf::from(&input.cwd);
+    let result = sandbox
+        .execute(&input.command, &cwd, input.env)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse::new(e.to_string())),
+            )
+        })?;
+
+    ok(ContainerExecResponse {
+        exit_code: result.exit_code,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        duration_ms: result.duration.as_millis() as u64,
+        truncated: result.truncated,
+    })
 }
 
 async fn container_delete(
